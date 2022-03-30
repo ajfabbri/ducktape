@@ -267,6 +267,16 @@ class RemoteAccount(HttpMixin):
         except Exception:
             return False
 
+    @staticmethod
+    def _via_sudo(cmd: str) -> str:
+        return "sudo sh -c '%s'" % cmd
+
+    def _maybe_add_sudo(self, cmd: str, want_sudo: bool) -> str:
+        if want_sudo and self.user != "root":
+            return self._via_sudo(cmd)
+        else:
+            return cmd
+
     @check_ssh
     def ssh(self, cmd, allow_fail=False):
         """Run the given command on the remote host, and block until the command has finished running.
@@ -406,11 +416,11 @@ class RemoteAccount(HttpMixin):
         except Exception:
             return False
 
-    def signal(self, pid, sig, allow_fail=False):
-        cmd = "kill -%d %s" % (int(sig), str(pid))
+    def signal(self, pid, sig, allow_fail=False, sudo=False):
+        cmd = self._maybe_add_sudo("kill -%d %s" % (int(sig), str(pid)), sudo)
         self.ssh(cmd, allow_fail=allow_fail)
 
-    def kill_process(self, process_grep_str, clean_shutdown=True, allow_fail=False):
+    def kill_process(self, process_grep_str, clean_shutdown=True, allow_fail=False, sudo=False):
         cmd = """ps ax | grep -i """ + process_grep_str + """ | grep -v grep | awk '{print $1}'"""
         pids = [pid for pid in self.ssh_capture(cmd, allow_fail=True)]
 
@@ -420,7 +430,7 @@ class RemoteAccount(HttpMixin):
             sig = signal.SIGKILL
 
         for pid in pids:
-            self.signal(pid, sig, allow_fail=allow_fail)
+            self.signal(pid, sig, allow_fail=allow_fail, sudo=sudo)
 
     def java_pids(self, match):
         """
@@ -431,7 +441,7 @@ class RemoteAccount(HttpMixin):
         cmd = """jcmd | awk '/%s/ { print $1 }'""" % match
         return [int(pid) for pid in self.ssh_capture(cmd, allow_fail=True)]
 
-    def kill_java_processes(self, match, clean_shutdown=True, allow_fail=False):
+    def kill_java_processes(self, match, clean_shutdown=True, allow_fail=False, sudo=False):
         """
         Kill all the java processes matching 'match'.
 
@@ -449,7 +459,7 @@ class RemoteAccount(HttpMixin):
             sig = signal.SIGKILL
 
         for pid in pids:
-            self.signal(pid, sig, allow_fail=allow_fail)
+            self.signal(pid, sig, allow_fail=allow_fail, sudo=sudo)
 
     def copy_between(self, src, dest, dest_node):
         """Copy src to dest on dest_node
@@ -622,10 +632,14 @@ class RemoteAccount(HttpMixin):
     def mkdir(self, path, mode=_DEFAULT_PERMISSIONS):
         self.sftp_client.mkdir(path, mode)
 
-    def mkdirs(self, path, mode=_DEFAULT_PERMISSIONS):
-        self.ssh("mkdir -p %s && chmod %o %s" % (path, mode, path))
+    def mkdirs(self, path, mode=_DEFAULT_PERMISSIONS, sudo=False):
+        cmd = self._maybe_add_sudo("mkdir -p %s && chmod %o %s" % (path, mode,
+                                                                   path), sudo)
+        self.ssh(cmd)
+        if sudo:
+            self.ssh(self._via_sudo("chown %s %s" % (self.user, path)))
 
-    def remove(self, path, allow_fail=False):
+    def remove(self, path, allow_fail=False, sudo=False):
         """Remove the given file or directory"""
 
         if allow_fail:
@@ -633,7 +647,7 @@ class RemoteAccount(HttpMixin):
         else:
             cmd = "rm -r %s" % path
 
-        self.ssh(cmd, allow_fail=allow_fail)
+        self.ssh(self._maybe_add_sudo(cmd, sudo), allow_fail=allow_fail)
 
     @contextmanager
     def monitor_log(self, log):
