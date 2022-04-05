@@ -136,6 +136,7 @@ class RemoteAccount(HttpMixin):
     """
 
     def __init__(self, ssh_config, externally_routable_ip=None, logger=None, ssh_exception_checks=[]):
+
         # Instance of RemoteAccountSSHConfig - use this instead of a dict, because we need the entire object to
         # be hashable
         self.ssh_config = ssh_config
@@ -155,6 +156,8 @@ class RemoteAccount(HttpMixin):
         self._ssh_client = None
         self._sftp_client = None
         self._custom_ssh_exception_checks = ssh_exception_checks
+        self.logger.warn(f"XXX RemoteAccount ssh_config {ssh_config} exernally {externally_routable_ip}")
+        self._log(logging.WARN, "ssh_config: %s" % str(self.ssh_config))
 
     @property
     def operating_system(self):
@@ -182,6 +185,7 @@ class RemoteAccount(HttpMixin):
 
         self._log(logging.DEBUG, "ssh_config: %s" % str(self.ssh_config))
 
+        self._log(logging.WARN, f"XXX connect hostname {self.ssh_config.hostname} key_filename {self.ssh_config.identityfile}")
         client.connect(
             hostname=self.ssh_config.hostname,
             port=self.ssh_config.port,
