@@ -102,6 +102,11 @@ def main():
         Run tests
         Report a summary of all results
     """
+    # XXX hack
+    import logging
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    logging.getLogger("paramiko").setLevel(logging.DEBUG)
+
     args_dict = parse_args(sys.argv[1:])
 
     injected_args = None
