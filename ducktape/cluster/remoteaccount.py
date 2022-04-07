@@ -192,8 +192,7 @@ class RemoteAccount(HttpMixin):
             username=self.ssh_config.user,
             password=self.ssh_config.password,
             key_filename=self.ssh_config.identityfile,
-            look_for_keys=False,
-            disabled_algorithms={"pubkeys": ["ssh-dss"], "keys": ["ssh-dss"]})
+            look_for_keys=False)
 
         if self._ssh_client:
             self._ssh_client.close()
