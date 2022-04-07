@@ -16,7 +16,7 @@ from contextlib import contextmanager
 import logging
 import os
 from paramiko import SSHClient, SSHConfig, MissingHostKeyPolicy
-from paramiko.ssh_exception import SSHException, NoValidConnectionsError
+from paramiko.ssh_exception import SSHException
 import shutil
 import signal
 import socket
@@ -33,7 +33,7 @@ def check_ssh(method):
     def wrapper(self, *args, **kwargs):
         try:
             return method(self, *args, **kwargs)
-        except (SSHException, NoValidConnectionsError, socket.error) as e:
+        except (SSHException, socket.error) as e:
             if self._custom_ssh_exception_checks:
                 self._log(logging.DEBUG, "starting ssh checks:")
                 self._log(logging.DEBUG, "\n".join(repr(f) for f in self._custom_ssh_exception_checks))
