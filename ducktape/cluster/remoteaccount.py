@@ -192,7 +192,7 @@ class RemoteAccount(HttpMixin):
             username=self.ssh_config.user,
             password=self.ssh_config.password,
             key_filename=self.ssh_config.identityfile,
-            look_for_keys=False)
+            look_for_keys=True)
 
         if self._ssh_client:
             self._ssh_client.close()
