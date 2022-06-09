@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import faulthandler
+from http.client import REQUEST_TIMEOUT
 import logging
 import os
 import signal
 import time
 import traceback
+from typing import Optional
 import zmq
+from zmq import Socket
 
 from six import iteritems
 
@@ -41,6 +45,8 @@ class RunnerClient(object):
     def __init__(self, server_hostname, server_port, test_id,
                  test_index, logger_name, log_dir, debug, fail_bad_cluster_utilization):
         signal.signal(signal.SIGTERM, self._sigterm_handler)  # register a SIGTERM handler
+        # for debugging stuck processes
+        faulthandler.register(signal.SIGUSR1)
 
         self.serde = SerDe()
         self.logger = test_logger(logger_name, log_dir, debug)
@@ -281,14 +287,15 @@ class RunnerClient(object):
 
 
 class Sender(object):
-    REQUEST_TIMEOUT_MS = 3000
+    REQUEST_TIMEOUT_MS = 1000
+    LINGER_MS = 500
     NUM_RETRIES = 5
 
     def __init__(self, server_host, server_port, message_supplier, logger):
         self.serde = SerDe()
         self.server_endpoint = "tcp://%s:%s" % (str(server_host), str(server_port))
         self.zmq_context = zmq.Context()
-        self.socket = None
+        self.socket: Optional[Socket] = None
         self.poller = zmq.Poller()
 
         self.message_supplier = message_supplier
@@ -298,6 +305,10 @@ class Sender(object):
 
     def _init_socket(self):
         self.socket = self.zmq_context.socket(zmq.REQ)
+        self.socket.setsockopt(zmq.LINGER, self.LINGER_MS)
+        # Should be able to send immediately
+        self.socket.setsockopt(zmq.SNDTIMEO, self.REQUEST_TIMEOUT_MS)
+
         self.socket.connect(self.server_endpoint)
         self.poller.register(self.socket, zmq.POLLIN)
 

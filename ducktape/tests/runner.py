@@ -38,6 +38,7 @@ from ducktape.errors import TimeoutError
 
 
 class Receiver(object):
+    LINGER_MS = 500
     def __init__(self, min_port, max_port):
         assert min_port <= max_port, "Expected min_port <= max_port, but instead: min_port: %s, max_port %s" % \
                                      (min_port, max_port)
@@ -49,6 +50,8 @@ class Receiver(object):
 
         self.zmq_context = zmq.Context()
         self.socket = self.zmq_context.socket(zmq.REP)
+        # Set a reasonable linger time to help with unclean shutdown
+        self.socket.setsockopt(zmq.LINGER, self.LINGER_MS)
 
     def start(self):
         """Bind to a random port in the range [self.min_port, self.max_port], inclusive
@@ -58,14 +61,13 @@ class Receiver(object):
                                                     max_tries=2 * (self.max_port + 1 - self.min_port))
 
     def recv(self, timeout=1800000):
-        if timeout is None:
-            # use default value of 1800000 or 30 minutes
-            timeout = 1800000
         self.socket.RCVTIMEO = timeout
+        t_0 = time.time()
         try:
             message = self.socket.recv()
         except zmq.Again:
-            raise TimeoutError("runner client unresponsive")
+            t_x = time.time()
+            raise TimeoutError(f"runner client unresponsive after {t_x - t_0:.2f} seconds.")
         return self.serde.deserialize(message)
 
     def send(self, event):
@@ -93,6 +95,7 @@ class TestRunner(object):
         # handler is inherited by all forked child processes, and it prevents the default python behavior
         # of translating SIGINT into a KeyboardInterrupt exception
         signal.signal(signal.SIGTERM, self._propagate_sigterm)
+        signal.signal(signal.SIGUSR1, self._propagate_sigusr1)
 
         # session_logger, message logger,
         self.session_logger = session_logger
@@ -115,9 +118,21 @@ class TestRunner(object):
         # This immutable dict tracks test_id -> test_context
         self._test_context = persistence.make_dict(**{t.test_id: t for t in tests})
         self._test_cluster = {}  # Track subcluster assigned to a particular TestKey
-        self._client_procs = {}  # track client processes running tests
+        # track client processes running tests
+        self._client_procs: dict[str, multiprocessing.Process] = {}
         self.active_tests = {}
         self.finished_tests = {}
+
+    def _propagate_sigusr1(self, signum, frame):
+        """ Propagate SIGUSR1 to all client processes. """
+        if os.getpid() != self.main_process_pid:
+            return
+
+        for p in self._client_procs.values():
+            assert p.pid != os.getpid(), "Signal handler unexpected in client subprocess."
+            if p.is_alive():
+                os.kill(p.pid, signal.SIGUSR1)
+
 
     def _propagate_sigterm(self, signum, frame):
         """Handler SIGTERM and SIGINT by propagating SIGTERM to all client processes.
@@ -204,11 +219,12 @@ class TestRunner(object):
                         self._handle(event)
                     except Exception as e:
                         err_str = "Exception receiving message: %s: %s" % (str(type(e)), str(e))
-                        err_str += "\n" + traceback.format_exc(limit=16)
+                        # err_str += "\n" + traceback.format_exc(limit=16)
                         self._log(logging.ERROR, err_str)
 
-                        # All processes are on the same machine, so treat communication failure as a fatal error
-                        raise
+                        # All processes are on the same machine, so treat
+                        # communication failure as a fatal error
+                        raise e from None
             except KeyboardInterrupt:
                 # If SIGINT is received, stop triggering new tests, and let the currently running tests finish
                 self._log(logging.INFO,
